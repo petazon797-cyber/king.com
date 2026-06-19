@@ -569,7 +569,8 @@ body.dark .adm-btn.full{background:var(--g200);color:var(--g800)}
       </div>
       <input type="hidden" id="mainType" value="MLBB">
       <div id="mlbbGroup">
-        <div class="fw"><label class="lbl">Pack</label>
+        <div class="fl" style="margin-bottom:14px">
+          <div style="flex:2.2"><label class="lbl">Pack</label>
           <select id="diaPack" onchange="updateCost()">
             <option value="0" data-sc="0">-- ရွေးပါ --</option>
             <optgroup label="2X Diamonds">
@@ -599,6 +600,10 @@ body.dark .adm-btn.full{background:var(--g200);color:var(--g800)}
               <option value="Twilight Pass" data-sc="402.5">Twilight Pass</option>
             </optgroup>
           </select>
+          </div>
+          <div style="flex:1"><label class="lbl">အရေအတွက်</label>
+            <input type="number" id="packQty" value="1" min="1" step="1" oninput="updateCost()" style="font-family:'Space Mono',monospace;font-weight:700;text-align:center">
+          </div>
         </div>
         <div class="fw"><label class="lbl">Agent</label><select id="agentSel"><option value="General">General</option></select></div>
         <div class="fw"><label class="lbl">Customer Name</label>
@@ -1186,7 +1191,8 @@ function updateCost(){
   if(document.getElementById('mainType').value==='MLBB'){
     const sc=parseFloat(document.getElementById('diaPack').selectedOptions[0].getAttribute('data-sc'))||0;
     const r=parseFloat(document.getElementById('scRate').value)||0;
-    document.getElementById('cost').value=sc?Math.round(sc*r):'';
+    const qty=parseInt(document.getElementById('packQty')?.value)||1;
+    document.getElementById('cost').value=sc?Math.round(sc*r*qty):'';
   }
   calcProfit();
 }
@@ -1271,11 +1277,16 @@ async function saveData(){
   const uName=document.getElementById('playerId').value||'No Name';
   const phone=document.getElementById('customerPhone').value||'';
   const agentName=document.getElementById('agentSel').value||'General';
-  const desc=type==='MLBB'?document.getElementById('diaPack').value:document.getElementById('bankName').value+' '+document.getElementById('transferAction').value;
+  const qty=type==='MLBB'?(parseInt(document.getElementById('packQty')?.value)||1):1;
+  const packName=type==='MLBB'?document.getElementById('diaPack').value:'';
+  const desc=type==='MLBB'?(qty>1?`${packName} x${qty}`:packName):document.getElementById('bankName').value+' '+document.getElementById('transferAction').value;
   const invoiceNo = await generateInvoiceNumber();
   
   const txData={
     description:desc,
+    packName,
+    qty,
+    unitPrice:qty>1?Math.round(sale/qty):sale,
     userName:uName,
     phone,
     agentName,
@@ -1291,6 +1302,7 @@ async function saveData(){
   document.getElementById('sale').value='';
   document.getElementById('playerId').value='';
   document.getElementById('customerPhone').value='';
+  document.getElementById('packQty').value='1';
   document.getElementById('profitPreview').style.display='none';
   showToast('Transaction saved! Invoice: ' + invoiceNo);
   if(document.getElementById('section-receipt').classList.contains('active')) {
@@ -1335,6 +1347,12 @@ function loadSales(){
 async function buildReceiptHTML(tx) {
   const now = new Date();
   const invoiceNo = tx.invoiceNo || await generateInvoiceNumber();
+  const qty = tx.qty || 1;
+  const itemRow = qty > 1
+    ? `<div class="receipt-row"><span>Item</span><span>${tx.packName || tx.description || '—'}</span></div>
+       <div class="receipt-row"><span>Quantity</span><span>${qty}</span></div>
+       <div class="receipt-row"><span>Unit Price</span><span>${(tx.unitPrice || 0).toLocaleString()} K</span></div>`
+    : `<div class="receipt-row"><span>Item</span><span>${tx.description || '—'}</span></div>`;
   return `
     <div class="receipt-preview-card" id="receiptCard">
       <div class="receipt-head">
@@ -1344,7 +1362,7 @@ async function buildReceiptHTML(tx) {
       <div class="receipt-row"><span>Invoice No</span><span><strong>${invoiceNo}</strong></span></div>
       <div class="receipt-row"><span>Date</span><span>${now.toLocaleDateString()}</span></div>
       <div class="receipt-row"><span>Time</span><span>${tx.time || now.toLocaleTimeString()}</span></div>
-      <div class="receipt-row"><span>Item</span><span>${tx.description || '—'}</span></div>
+      ${itemRow}
       <div class="receipt-row"><span>Customer</span><span>${tx.phone || tx.userName || '—'}</span></div>
       <div class="receipt-row"><span>Agent</span><span>${tx.agentName || 'General'}</span></div>
       <div class="receipt-row total"><span>Total</span><span>${(tx.salePrice || 0).toLocaleString()} K</span></div>
