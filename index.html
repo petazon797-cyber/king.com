@@ -427,6 +427,24 @@ body.dark .adm-btn.full{background:var(--g200);color:var(--g800)}
   color: var(--navy);
   margin-bottom: 2px;
 }
+.receipt-preview-card .receipt-contact {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .62rem;
+  color: var(--g600, #475569);
+}
+.receipt-preview-card .receipt-contact-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.receipt-preview-card .receipt-contact-item svg {
+  flex-shrink: 0;
+}
 .receipt-preview-card .receipt-row {
   display: flex;
   justify-content: space-between;
@@ -1259,54 +1277,76 @@ async function generateInvoiceNumber() {
   const day = now.getDate().toString().padStart(2, '0');
   const dateKey = `${year}${month}${day}`;
   const counterRef = db.collection('counters').doc(dateKey);
-  const newCount = await db.runTransaction(async t => {
-    const doc = await t.get(counterRef);
-    const next = doc.exists ? (doc.data().seq || 0) + 1 : 1;
-    t.set(counterRef, { seq: next, date: todayStr }, { merge: true });
-    return next;
-  });
-  return `INV-${dateKey}-${String(newCount).padStart(3, '0')}`;
+  try {
+    const newCount = await db.runTransaction(async t => {
+      const doc = await t.get(counterRef);
+      const next = doc.exists ? (doc.data().seq || 0) + 1 : 1;
+      t.set(counterRef, { seq: next, date: todayStr }, { merge: true });
+      return next;
+    });
+    return `INV-${dateKey}-${String(newCount).padStart(3, '0')}`;
+  } catch(e) {
+    // Firestore transactions need a live connection and fail when offline/unreachable.
+    // Fall back to a local counter so the sale itself is never blocked from saving.
+    console.warn('Invoice counter unreachable (offline?), using local fallback invoice number:', e);
+    const lsKey = 'kgs_local_inv_' + dateKey;
+    const next = (parseInt(localStorage.getItem(lsKey)) || 0) + 1;
+    localStorage.setItem(lsKey, next);
+    return `INV-${dateKey}-L${String(next).padStart(3, '0')}`;
+  }
 }
 
 // ── SAVE DATA ──
 async function saveData(){
   const sale=parseFloat(document.getElementById('sale').value)||0;
   const cost=parseFloat(document.getElementById('cost').value)||0;
-  if(!sale)return showToast('ဈေးနှုန်းထည့်ပါ');
-  const type=document.getElementById('mainType').value;
-  const uName=document.getElementById('playerId').value||'No Name';
-  const phone=document.getElementById('customerPhone').value||'';
-  const agentName=document.getElementById('agentSel').value||'General';
-  const qty=type==='MLBB'?(parseInt(document.getElementById('packQty')?.value)||1):1;
-  const packName=type==='MLBB'?document.getElementById('diaPack').value:'';
-  const desc=type==='MLBB'?(qty>1?`${packName} x${qty}`:packName):document.getElementById('bankName').value+' '+document.getElementById('transferAction').value;
-  const invoiceNo = await generateInvoiceNumber();
-  
-  const txData={
-    description:desc,
-    packName,
-    qty,
-    unitPrice:qty>1?Math.round(sale/qty):sale,
-    userName:uName,
-    phone,
-    agentName,
-    cost,
-    salePrice:sale,
-    profit:sale-cost,
-    type,
-    dateKey:todayStr,
-    invoiceNo: invoiceNo,
-    timestamp:firebase.firestore.FieldValue.serverTimestamp()
-  };
-  await db.collection('sales').add(txData);
-  document.getElementById('sale').value='';
-  document.getElementById('playerId').value='';
-  document.getElementById('customerPhone').value='';
-  document.getElementById('packQty').value='1';
-  document.getElementById('profitPreview').style.display='none';
-  showToast('Transaction saved! Invoice: ' + invoiceNo);
-  if(document.getElementById('section-receipt').classList.contains('active')) {
-    filterReceipts();
+  if(!sale){showToast('ဈေးနှုန်းထည့်ပါ');return false;}
+  const btn=document.querySelector('.save-btn');
+  const origBtnText=btn?btn.innerHTML:'';
+  if(btn){btn.disabled=true;btn.innerHTML='Saving...';}
+  try{
+    const type=document.getElementById('mainType').value;
+    const uName=document.getElementById('playerId').value||'No Name';
+    const phone=document.getElementById('customerPhone').value||'';
+    const agentName=document.getElementById('agentSel').value||'General';
+    const qty=type==='MLBB'?(parseInt(document.getElementById('packQty')?.value)||1):1;
+    const packName=type==='MLBB'?document.getElementById('diaPack').value:'';
+    const desc=type==='MLBB'?(qty>1?`${packName} x${qty}`:packName):document.getElementById('bankName').value+' '+document.getElementById('transferAction').value;
+    const invoiceNo = await generateInvoiceNumber();
+
+    const txData={
+      description:desc,
+      packName,
+      qty,
+      unitPrice:qty>1?Math.round(sale/qty):sale,
+      userName:uName,
+      phone,
+      agentName,
+      cost,
+      salePrice:sale,
+      profit:sale-cost,
+      type,
+      dateKey:todayStr,
+      invoiceNo: invoiceNo,
+      timestamp:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    await db.collection('sales').add(txData);
+    document.getElementById('sale').value='';
+    document.getElementById('playerId').value='';
+    document.getElementById('customerPhone').value='';
+    document.getElementById('packQty').value='1';
+    document.getElementById('profitPreview').style.display='none';
+    showToast('Transaction saved! Invoice: ' + invoiceNo);
+    if(document.getElementById('section-receipt').classList.contains('active')) {
+      filterReceipts();
+    }
+    return true;
+  } catch(err) {
+    console.error('saveData error:', err);
+    showToast('Save မအောင်မြင်ပါ - ' + (err?.message || 'ထပ်စမ်းကြည့်ပါ'));
+    return false;
+  } finally {
+    if(btn){btn.disabled=false;btn.innerHTML=origBtnText;}
   }
 }
 
@@ -1357,6 +1397,10 @@ async function buildReceiptHTML(tx) {
     <div class="receipt-preview-card" id="receiptCard">
       <div class="receipt-head">
         <div class="receipt-title">King Game-Shop</div>
+        <div class="receipt-contact">
+          <span class="receipt-contact-item"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>09446627892</span>
+          <span class="receipt-contact-item"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 3.5L18.4 20.2c-.3 1.2-1 1.5-2 .9l-5.5-4.1-2.7 2.6c-.3.3-.5.5-1 .5l.4-5.6L18 5.4c.5-.4-.1-.7-.7-.3L6.7 12.3 1.3 10.6c-1.2-.4-1.2-1.2.2-1.7L20.4 1.9c1-.3 1.8.2 1.5 1.6z"/></svg>Tg : @kopethaung778</span>
+        </div>
         <div style="font-size:.6rem;color:#94a3b8;margin-top:2px">Payment Receipt</div>
       </div>
       <div class="receipt-row"><span>Invoice No</span><span><strong>${invoiceNo}</strong></span></div>
@@ -2035,8 +2079,9 @@ const _origSaveData=saveData;
 saveData=async function(){
   const name=document.getElementById('playerId').value||'No Name';
   const pack=document.getElementById('diaPack')?.value||'';
-  await _origSaveData();
-  savePlayerToHistory(name,pack);
+  const ok=await _origSaveData();
+  if(ok)savePlayerToHistory(name,pack);
+  return ok;
 };
 
 // ── SHELL SWITCHER ──
